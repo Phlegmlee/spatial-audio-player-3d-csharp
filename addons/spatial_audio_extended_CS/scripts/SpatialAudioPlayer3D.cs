@@ -4,7 +4,7 @@ namespace SpatialAudioCS;
 /// <summary>
 /// TODO: Documentation
 /// </summary>
-[Tool, Icon("addons/spatial_audio_extended_CS/assets/spatial_audio_player_3d.svg")]
+[Tool, Icon("uid://diaqpjedywsus"), GlobalClass]
 public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 {
 	#region Signals

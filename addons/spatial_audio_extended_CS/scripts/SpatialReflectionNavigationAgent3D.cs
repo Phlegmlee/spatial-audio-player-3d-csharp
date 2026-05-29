@@ -4,7 +4,7 @@ namespace SpatialAudioCS;
 /// <summary>
 /// TODO: Documentation
 /// </summary>
-[Tool, Icon("addons/spatial_audio_extended_CS/assets/spatial_reflection_navigation_agent_3d.svg")]
+[Tool, Icon("uid://borvk2otixktj"), GlobalClass]
 public partial class SpatialReflectionNavigationAgent3D : Node3D
 {
 	#region Signals

@@ -4,7 +4,7 @@ namespace SpatialAudioCS;
 /// <summary>
 /// TODO: Documentation
 /// </summary>
-[Tool, Icon("addons/spatial_audio_extended_CS/assets/acoustic_material.svg"), GlobalClass]
+[Tool, Icon("uid://cnhph2uchj8wu"), GlobalClass]
 public partial class AcousticMaterial : Resource
 {
 	#region Exports
