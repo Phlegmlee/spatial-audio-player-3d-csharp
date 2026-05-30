@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Godot;
 namespace SpatialAudioCS;
 
@@ -146,6 +148,7 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 
 	#endregion
 
+#if DEBUG
 	#region Signals - Debug
 
 	/// <summary>
@@ -162,6 +165,7 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 	[Signal] public delegate void SpatialAudioDebugInfoEventHandler(Godot.Collections.Dictionary info);
 
 	#endregion
+#endif
 
 	#region Exports - Rays
 
@@ -923,6 +927,7 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 
 	#endregion
 
+#if DEBUG
 	#region Exports - Debug
 
 	[ExportGroup("Debug")]
@@ -1013,12 +1018,224 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 		set => _debugToggleShapesKey = value;
 	}
 
+	private bool _effectsEnabledValue = true;
+	[Export]
+	public bool EffectsEnabledValue
+	{
+		get => _effectsEnabledValue;
+		set
+		{
+			_effectsEnabledValue = value;
+			GlobalEffectsDisabled = !value;
+		}
+	}
+
 	#endregion
+#endif
 
 	#region Internal State
 
-	// TODO: Internal
+	private RayCast3D[] _raycasts = [];
+	private float[] _distances = [];
+	private string[] _rayNames = [];
 
+	private Vector3[] _rayDirections = [];
+
+	private Array[] _reflectionPaths = [];
+
+	private bool[] _reflectionEscaped = [];
+
+	private float[] _rayAbsorptions = [];
+
+	private bool[] _rayTotalAbsorption = [];
+
+	private float[] _rayTotalAbsorptionTransitionSpeeds = [];
+
+	private string[] _rayMaterialNames = [];
+
+	private RayCast3D _targetRaycast = null;
+
+	private const float _TotalAbsorptionReverbWetnessCap = 0.05f;
+	private const float _TotalAbsorptionReverbDampingFloor = 0.90f;
+	private const float _TotalAbsorptionLowpassHz = 20.0f;
+	private const float _TotalAbsorptionMuteDb = -120.0f;
+	private const float _TotalAbsorptionTransitionThresholdDb = -100.0f;
+	private const float _DefaultTotalAbsorptionTransitionSpeed = 2.5f;
+
+	private readonly Dictionary<string, Vector3[]> _classicRays = new()
+	{
+		{ "Left", [Vector3.Right, Vector3.Zero]},
+		{ "Right", [Vector3.Left, Vector3.Zero]},
+		{ "Forward", [Vector3.Back, Vector3.Zero]},
+		{ "ForwardLeft", [Vector3.Back, new Vector3(0, 45, 0)]},
+		{ "ForwardRight", [Vector3.Back, new Vector3(0, -45, 0)]},
+		{ "Backward", [Vector3.Forward, Vector3.Zero]},
+		{ "BackwardLeft", [Vector3.Forward, new Vector3(0, -45, 0)]},
+		{ "BackwardRight", [Vector3.Forward, new Vector3(0, 45, 0)]},
+		{ "Up", [Vector3.Up, Vector3.Zero]},
+		{ "Down", [Vector3.Down, Vector3.Zero]},
+	};
+
+	private float _lastUpdateTime = 0.0f;
+	private bool _setupComplete = false;
+	private bool _initialScanDone = false;
+	private bool _autoplayFadeActive = false;
+
+	private bool _wasInsideInner = false;
+	private bool _wasInFalloff = false;
+	private bool _wasAudible = false;
+	private float _lastListenerDistance = -1.0f;
+
+	private float _lastReverbRoomSize = -1.0f;
+	private float _lastReverbWetness = -1.0f;
+	private float _lastReverbDamping = -1.0f;
+	private float _lastAirAbsorptionCutoff = -1.0f;
+
+	private string _busName = "";
+	private int _busIndex = 1;
+	private AudioEffectReverb _reverbEffect = null;
+	private AudioEffectLowPassFilter _lowpassFilter = null;
+
+	private float _targetLowpassCutoff = 20000.0f;
+	private float _targetReverbRoomSize = 0.0f;
+	private float _targetReverbWetness = 0.0f;
+	private float _targetReverbDamping = 0.0f;
+	private float _targetVolumeDb = 0.0f;
+
+	private float _openness = 0.0f;
+
+	private float _basePanningStrength = 1.0f;
+	private float _targetPanningStrength = 1.0f;
+
+	private float _targetAirAbsorptionCutoff = 20000.0f;
+
+	private SceneTreeTimer _pendingDelayTimer = null;
+
+	private int _playInitiatedTime = -1;
+
+	private int _playInitiatedDuration = 0;
+
+	private int _lastWallCount = 0;
+
+	private string[] _lastWallMaterials = [];
+
+	private float _baseVolumeDb = 0.0f;
+
+	private float _externalVolumeDbOffset = 0.0f;
+
+	private ulong _externalOcclusionHoldUntilMsec = 0;
+
+	private bool _hardMutedByTotalAbsorption = false;
+
+	private float _activeTotalAbsorptionTransitionSpeed = _DefaultTotalAbsorptionTransitionSpeed;
+
+#if DEBUG
+	private ImmediateMesh _debugImmediate = null;
+	private MeshInstance3D _debugInstance = null;
+
+	private PanelContainer _debugPanel = null;
+	private bool _debugMinimized = false;
+	private Button _debugMinimizeButton = null;
+	private RichTextLabel _debugHeaderLabel = null;
+	private VBoxContainer _debugContentVbox = null;
+	private RichTextLabel _debugOverlayLabel = null;
+	private RichTextLabel _debugRaysLabel = null;
+	private ScrollContainer _debugRaysScroll = null;
+	private Button _debugRaysToggle = null;
+	private bool _raysExpanded = false;
+	private RichTextLabel _debugNavigationLabel = null;
+	private ScrollContainer _debugNavigationScroll = null;
+	private Button _debugNavigationToggle = null;
+	private bool _debugNavigationExpanded = false;
+	private Line2D _debugConnectorLine = null;
+	private float _debugOcclAbsWeight = 0.0f;
+
+	private Dictionary<int, bool> _debugRayReflectiosExpanded = [];
+	private bool _externalNavigationDebugActive = false;
+	private Dictionary<string, Variant> _externalNavigationDebug = [];
+
+	private CanvasLayer _debugSharedLayer = null;
+	private ScrollContainer _debugSharedScroll = null;
+	private VBoxContainer _debugSharedVbox = null;
+#endif
+
+#if TOOLS
+	private EditorInterface _editorInterface = null;
+#endif
+
+	internal bool GlobalEffectsDisabled { get; set; } = false;
+
+	#endregion
+
+	#region Internal API
+
+	/// <summary>
+	/// Allows external systems to apply extra dB reduction (loudness loss)
+	/// without fighting <see cref="SpatialAudioPlayer3D"/>s internal attenuation.
+	/// <para>See <see cref="SpatialReflectionNavigationAgent3D"/></para>
+	/// </summary>
+	/// <param name="offset">Extra dB reduction desired.</param>
+	internal void SetExternalVolumeDbOffset(float offset)
+	{
+		_externalVolumeDbOffset = offset;
+	}
+	
+	internal float GetExternalVolumeDbOffset()
+	{
+		return _externalVolumeDbOffset;
+	}
+
+	internal void ClearExternalVolumeDbOffset()
+	{
+		_externalVolumeDbOffset = 0.0f;
+	}
+
+	/// <summary>
+	/// Temporarily forces occlusion open. 
+	/// Intended for proxy-transition smoothing.
+	/// </summary>
+	/// <param name="seconds"></param>
+	internal void SetExternalOcclusionHold(float seconds)
+	{
+		ulong durationMs = (ulong)Math.MaxMagnitude(seconds, 0.0) * 1000;
+		if (durationMs <= 0) return;
+
+		ulong until = Time.GetTicksMsec() + durationMs;
+		_externalOcclusionHoldUntilMsec = Math.Max(_externalOcclusionHoldUntilMsec, until);
+	}
+
+	internal void ClearExternalOcclusionHold()
+	{
+		_externalOcclusionHoldUntilMsec = 0;
+	}
+
+	internal bool IsExternalOcclusionHeld()
+	{
+		return Time.GetTicksMsec() < _externalOcclusionHoldUntilMsec;
+	}
+
+#if DEBUG
+	internal void SetExternalNavigationDebugData(bool active, Dictionary<string, Variant> info)
+	{
+		_externalNavigationDebugActive = active;
+		if (active)
+		{
+			_externalNavigationDebug = new Dictionary<string, Variant>(info);
+		}
+		else
+		{
+			_externalNavigationDebug = [];
+		}
+		//RefreshNavigationDebugVisibility();
+	}
+
+	internal void ClearExternalNavigationDebugData()
+	{
+		_externalNavigationDebugActive = false;
+		_externalNavigationDebug.Clear();
+		//RefreshNavigationDebugVisibility();
+	}
+#endif
 	#endregion
 
 	#region Sound Speed Delay
@@ -1042,6 +1259,11 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 	#region Utils
 
 	// TODO: Utils
+
+	private float ApplyExternalVolumeOffset(float volumeValue)
+	{
+		return (float)Math.MaxMagnitude(volumeValue + _externalVolumeDbOffset, _minimumVolumeDb);
+	}
 
 	#endregion
 
@@ -1075,6 +1297,7 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 
 	#endregion
 
+#if DEBUG
 	#region Debug Overlay
 
 	// TODO: Debug Overlay
@@ -1086,4 +1309,5 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 	// TODO: Debug Drawing
 
 	#endregion
+#endif
 }
