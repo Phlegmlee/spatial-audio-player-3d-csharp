@@ -1297,15 +1297,61 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 #endif
 	#endregion
 
-	#region Lifecycle
+	#region Gameplay Logic
 
-	// TODO: Lifecycle
+	/// <summary>
+	/// See: <see cref="EditorReady"/> for editor tool.
+	/// <para>Anything below the deferred call is in game logic.</para>
+	/// </summary>
+	public override void _Ready()
+	{
+		if (Engine.IsEditorHint())
+		{
+			CallDeferred(MethodName.EditorReady);
+			return;
+		}
 
-	#endregion
+		_baseVolumeDb = VolumeDb;
+		_targetVolumeDb = VolumeDb;
+		_basePanningStrength = PanningStrength;
+		_targetPanningStrength = PanningStrength;
+
+		if (Autoplay && AutoplayFadeIn)
+		{
+			VolumeDb = MinimumVolumeDb;
+			_autoplayFadeActive = true;
+		}
+
+		if (EnableVolumeAttenuation)
+		{
+			AttenuationModel = AttenuationModelEnum.Disabled;
+		}
+
+		_busName = AudioBusPrefix + "#" + new Random().Next(1, 100).ToString();
+		AudioServer.AddBus();
+		_busIndex = AudioServer.BusCount - 1;
+		AudioServer.SetBusName(_busIndex, _busName);
+		AudioServer.SetBusSend(_busIndex, Bus);
+		this.Bus = _busName;
+
+		AudioServer.AddBusEffect(_busIndex, new AudioEffectReverb(), 0);
+		_reverbEffect = AudioServer.GetBusEffect(_busIndex, 0) as AudioEffectReverb;
+
+		AudioServer.AddBusEffect(_busIndex, new AudioEffectLowPassFilter(), 1);
+		_lowpassFilter = AudioServer.GetBusEffect(_busIndex, 1) as AudioEffectLowPassFilter;
+	}
+
+	private void RebuildRaycasts()
+	{
+		// TODO
+	}
 
 	#region Physics Process
 
-	// TODO: Physics Process
+	public override void _PhysicsProcess(double delta)
+	{
+		// TODO
+	}
 
 	#endregion
 
@@ -1313,11 +1359,26 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 
 	// TODO: Parameter Lerping
 
+	private void LerpParameters(float delta)
+	{
+
+	}
+
+	private void SnapParameters(bool snapVolume = true)
+	{
+
+	}
+
 	#endregion
 
 	#region  Spatial Audio Update
 
 	// TODO: Spatial Audio Update
+
+	private void OnSpatialAudioUpdate(Node3D listener)
+	{
+
+	}
 
 	#endregion
 
@@ -1325,35 +1386,58 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 
 	// TODO: Volume Attenuation
 
+	private void UpdateVolumeAttenuation(Node3D listener)
+	{
+
+	}
+
+	private void UpdatePanningStrength(Node3D listener)
+	{
+
+	}
+
+	private void UpdateAirAbsorption(Node3D listener)
+	{
+
+	}
+
+	private float ApplyAttenuationFunction(float alpha)
+	{
+		return 1.0f - alpha;
+	}
+
 	#endregion
 
 	#region Reverb
 
 	// TODO: Reverb
 
+	private void UpdateOmniDistance(RayCast3D ray, int index)
+	{
+
+	}
+
+	private void UpdateReverb()
+	{
+
+	}
+
 	#endregion
 
 	#region Occlusion
 
 	// TODO: Occlusion
+	
+	private void UpdateLowpass(Node3D listener)
+	{
+		
+	}
+
+	#endregion
 
 	#endregion
 
 	#region Utils
-
-	// TODO: Utils
-
-	private float ApplyExternalVolumeOffset(float volumeValue)
-	{
-		return (float)Math.MaxMagnitude(volumeValue + _externalVolumeDbOffset, _minimumVolumeDb);
-	}
-
-	private double GetStreamLength()
-	{
-		double streamLength = 0.0;
-		if (Stream != null) streamLength = Stream.GetLength();
-		return streamLength;
-	}
 
 	private bool IsEditorSelected()
 	{
@@ -1381,10 +1465,48 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 		return GetViewport().GetCamera3D();
 	}
 
+	private CharacterBody3D FindCharacterBody(Node node)
+	{
+		Node currentNode = node;
+		while (currentNode != null)
+		{
+			if (currentNode is CharacterBody3D) return currentNode as CharacterBody3D;
+			currentNode = currentNode.GetParent();
+		}
+		return null;
+	}
+
+	private Vector3[] GenerateFibonacciSphere(int count)
+	{
+		List<Vector3> directions = [];
+
+		// TODO
+
+		return [.. directions];
+	}
+
+	private Vector3 RandomUnitVector()
+	{
+		// TODO
+		return new Vector3();
+	}
+
+	private float ApplyExternalVolumeOffset(float volumeValue)
+	{
+		return (float)Math.MaxMagnitude(volumeValue + _externalVolumeDbOffset, _minimumVolumeDb);
+	}
+
 	private void SetPlayInitiated()
 	{
 		_playInitiatedTime = Time.GetTicksMsec();
 		_playInitiatedDuration = (int)GetStreamLength() * 1000;
+	}
+
+	private double GetStreamLength()
+	{
+		double streamLength = 0.0;
+		if (Stream != null) streamLength = Stream.GetLength();
+		return streamLength;
 	}
 
 	#endregion
@@ -1403,8 +1525,259 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 
 	#endregion
 
+#if TOOLS
+	#region Editor Config
+
+	/// <summary>
+	/// This is <see cref="_Ready"/> but for the editor only.
+	/// </summary>
+	private void EditorReady()
+	{
+		if (!Engine.IsEditorHint()) return;
+
+		RebuildRaycasts();
+
+		EffectsEnabledValue = !GlobalEffectsDisabled;
+		
+		_editorInterface = EditorInterface.Singleton;
+
+		if (DebugDrawRays || DebugDrawRadius || DebugDrawPlayingState) SetupDebugMesh();
+
+		_setupComplete = true;
+
+		_lastListenerDistance = -1.0f;
+		_wasInsideInner = false;
+		_wasInFalloff = false;
+		_wasAudible = false;
+		_lastReverbRoomSize = _targetReverbRoomSize;
+		_lastReverbWetness = _targetReverbWetness;
+		_lastReverbDamping = _targetReverbDamping;
+		_lastAirAbsorptionCutoff = _targetAirAbsorptionCutoff;
+	}
+
+	/// <summary>
+	/// Hide/Show export properties based on status.
+	/// </summary>
+	/// <param name="property"></param>
+	public override void _ValidateProperty(Godot.Collections.Dictionary property)
+	{
+		List<StringName> fibonacciProperties =
+		[
+			PropertyName.FibonacciRayCount, PropertyName.FibonacciRayReflections,
+		];
+		if (RayDistribution != EmitterRayDistribution.FibonacciSphere)
+		{
+			foreach (StringName propName in fibonacciProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+
+		List<StringName> scatterProperties =
+		[
+			PropertyName.ScatterShape, PropertyName.ShapeRayCount, PropertyName.ShapeScatterRandomness,
+		];
+		if (RayDistribution != EmitterRayDistribution.ShapeScatter)
+		{
+			foreach (StringName propName in scatterProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+
+		List<StringName> reverbProperties =
+		[
+			PropertyName.MaxReverbWetness, PropertyName.SurfaceAbsorption,
+			PropertyName.AbsorptionWetnessInfluence, PropertyName.AbsorptionDampingInfluence,
+			PropertyName.IgnoreFloor, PropertyName.FloorAngleThreshold,
+			PropertyName.ReverbCollisionMask,
+		];
+		if (!RoomSizeReverb)
+		{
+			foreach (StringName propName in reverbProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+
+		List<StringName> surfaceAbsorptionProperties =
+		[
+			PropertyName.AbsorptionWetnessInfluence, PropertyName.AbsorptionDampingInfluence,
+		];
+		if (!SurfaceAbsorption)
+		{
+			foreach (StringName propName in surfaceAbsorptionProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+
+		if (!IgnoreFloor && (StringName)property["name"] == PropertyName.FloorAngleThreshold)
+		{
+			property["usage"] = (int)~PropertyUsageFlags.Editor;
+		}
+
+		List<StringName> occlusionProperties =
+		[
+			PropertyName.OcclusionStrength, PropertyName.MaxOcclusionHits,
+			PropertyName.FallbackTransmission, PropertyName.OcclusionVolumeStrength,
+			PropertyName.MaxOcclusionVolumeReduction, PropertyName.OcclusionCollisionMask,
+			PropertyName.IgnoreListenerBody,
+		];
+		if (!AudioOcclusion)
+		{
+			foreach (StringName propName in occlusionProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+
+		List<StringName> attenuationProperties =
+		[
+			PropertyName.InnerRadius, PropertyName.FalloffDistance,
+			PropertyName.AttenuationFunction, PropertyName.UserAttenuationCurve,
+		];
+		if (!EnableVolumeAttenuation)
+		{
+			foreach (StringName propName in attenuationProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+
+		List<StringName> airAbsorptionProperties =
+		[
+			PropertyName.AirAbsorptionMinDistance, PropertyName.AirAbsorptionMaxDistance,
+			PropertyName.AirAbsorptionCutoffFreqMin, PropertyName.AirAbsorptionCutoffFreqMax,
+			PropertyName.AirAbsorptionLogFreqScaling,
+		];
+		if (!EnableAirAbsorption)
+		{
+			foreach (StringName propName in airAbsorptionProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+
+		if (AttenuationFunction != AttenuationFunctionType.UserDefined && (StringName)property["name"] == PropertyName.UserAttenuationCurve)
+		{
+			property["usage"] = (int)~PropertyUsageFlags.Editor;
+		}
+
+		if (!EnableSoundDelay && (StringName)property["name"] == PropertyName.SpeedOfSound)
+		{
+			property["usage"] = (int)~PropertyUsageFlags.Editor;
+		}
+
+		if (!AutoplayFadeIn && (StringName)property["name"] == PropertyName.AutoplayFadeInSpeed)
+		{
+			property["usage"] = (int)~PropertyUsageFlags.Editor;
+		}
+
+		List<StringName> debugProperties =
+		[
+			PropertyName.DebugToggleEffectsKey, PropertyName.DebugToggleShapesKey,
+		];
+		if (!EnableAirAbsorption)
+		{
+			foreach (StringName propName in debugProperties)
+			{
+				if ((StringName)property["name"] == propName)
+				{
+					property["usage"] = (int)~PropertyUsageFlags.Editor;
+				}
+			}
+		}
+	}
+
+	#endregion
+#endif
+
 #if DEBUG
 	#region Debug Overlay
+
+	private void SharedDebugContainer()
+	{
+
+	}
+
+	private void SetupDebugOverlay()
+	{
+
+	}
+
+	private void OnDebugMinimizeToggled()
+	{
+
+	}
+
+	private void OnRaysTogglePressed()
+	{
+
+	}
+
+	private void OnNavigationTogglePressed()
+	{
+
+	}
+
+	private void RefreshNavigationDebugVisibility()
+	{
+
+	}
+
+	private string FormatNavigationDebugText()
+	{
+		return "";
+	}
+
+	private void OnRayMetaClicked(Variant meta)
+	{
+
+	}
+	
+	private void PrintDebug(Node3D listener)
+	{
+		
+	}
+
+	/// <summary>
+	/// Look for unhandled input for the debug pannel interactions.
+	/// </summary>
+	/// <param name="event"></param>
+	public override void _UnhandledInput(InputEvent @event)
+	{
+
+	}
+
+	/// <summary>
+	/// Remove per-instance debug nodes from the shared container.
+	/// </summary>
+	public override void _ExitTree()
+	{
+
+	}
 
 	// TODO: Debug Overlay
 
@@ -1413,6 +1786,31 @@ public partial class SpatialAudioPlayer3D : AudioStreamPlayer3D
 	#region Debug Drawing
 
 	// TODO: Debug Drawing
+
+	private void UpdateDebugConnectorLine()
+	{
+		
+	}
+
+	private void SetupDebugMesh()
+	{
+
+	}
+
+	private void DrawDebugShapes(bool editorSelected = false)
+	{
+
+	}
+
+	private void DrawDebugRays()
+	{
+
+	}
+	
+	private void DrawWireframeSphere(Vector3 center, float radius, Color color, int segments = 64)
+	{
+		
+	}
 
 	#endregion
 #endif
